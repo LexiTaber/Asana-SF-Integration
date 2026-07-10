@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Bash(sf deploy *)",
+      "Bash(sf project deploy *)",
+      "Bash(sfdx force:source:deploy *)",
+      "Bash(sfdx force:mdapi:deploy *)",
+      "Bash(sfdx project deploy *)"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+.env
+*.local.http
+.sfdx/
+asana-discovery.gitignore
