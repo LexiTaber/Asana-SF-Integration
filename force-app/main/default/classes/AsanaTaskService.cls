@@ -12,7 +12,7 @@
  */
 public with sharing class AsanaTaskService {
 
-    private static final String NAMED_CREDENTIAL = 'callout:Asana';
+    private static final String NAMED_CREDENTIAL = 'callout:Asana_API';
     private static final String PROJECT_GID = '1213427513705845';
 
     // Custom field GIDs (Loan Onboarding Tracker 2.0)

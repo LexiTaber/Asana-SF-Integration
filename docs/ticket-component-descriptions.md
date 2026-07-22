@@ -108,3 +108,18 @@ This gap does not block sandbox deploys but **will block a production deploy**, 
 **`buildOpp()` helper:** Constructs a minimal in-memory `Opportunity` object for test use. Does not insert to the database — avoids DML overhead and trigger side effects not relevant to service-layer tests. `Lead_Participant__c` is set to `null` (not `''`) because it is a Lookup field; empty string throws `System.StringException: Invalid id`.
 
 **Formula fields:** `Opportunity_Owner_Name__c` and `TEA_Loan_Fund__c` are not assigned in `buildOpp()` because formula fields are not writable in Apex test context.
+
+---
+
+## Opportunity.Asana_Task_GID__c
+
+Custom field metadata retrieved from the `asanaint` sandbox, source of truth at [Asana_Task_GID__c.field-meta.xml](../force-app/main/default/objects/Opportunity/fields/Asana_Task_GID__c.field-meta.xml):
+
+| Property | Value |
+|---|---|
+| Label | Asana Task GID |
+| Type | Text |
+| Length | 20 |
+| Required | false |
+| External ID | true |
+| Unique | false |

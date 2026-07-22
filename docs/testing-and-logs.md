@@ -51,8 +51,9 @@ Use this to test the Asana callout independently of the trigger — useful for d
 Opportunity opp = [
     SELECT Id, Name, Asana_Task_GID__c,
            Colson_Number__c, Maturity_Date__c, Outstanding_Amount__c,
-           StageName, Opportunity_Owner_Name__c, CloseDate,
-           TEA_Loan_Fund__c, Participation_Loan1__c, Lead_Participant__c
+           StageName, Opportunity_Owner_Name__c, Close_Date__c,
+           TEA_Loan_Fund__c, Participation_Loan1__c, Lead_Participant__c,
+           Lead_Participant__r.Name
     FROM Opportunity
     ORDER BY CreatedDate DESC
     LIMIT 1

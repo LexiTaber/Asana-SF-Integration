@@ -3,9 +3,9 @@
 The Asana callout in `AsanaTaskService` authenticates through Salesforce's
 External Credential + Named Credential model (Summer '24+), not a
 Named-Credential-only legacy auth config. The External Credential holds the
-Bearer token; the Named Credential holds the endpoint URL and points at the
-External Credential for auth. Apex never sees the token — it only references
-`callout:Asana`.
+raw token; the Named Credential holds the endpoint URL and a Custom Header
+that references the token via merge field. Apex never sees the token — it
+only references `callout:Asana_API`.
 
 This is a one-time manual setup in each org (sandbox and production each need
 their own). It is not captured in the metadata deployed by this repo, so a
@@ -23,17 +23,18 @@ fresh org (or a lost/rotated token) requires redoing these steps.
 
 | Field | Value |
 |---|---|
-| Label | `Asana` |
-| Name | `Asana` |
+| Label | `Asana API` |
+| Name | `Asana_API` |
 | Authentication Protocol | **Custom** |
 
 Save, then on the External Credential detail page:
 
-1. Under **Principals**, click **New** and add a Principal (e.g. Parameter Name `AsanaPrincipal`).
-2. Under **Custom Headers** (or **Parameters**, depending on org version), add a
-   parameter on the principal:
+1. Under **Principals**, click **New** and add a Principal (Parameter Name
+   `AsanaIntegration`, Identity Type `Named Principal`).
+2. Open the new principal and add an **Authentication Parameter**:
    - Name: `Authorization`
-   - Value: `Bearer <PASTE_PAT_HERE>`
+   - Value: `<PASTE_PAT_HERE>` (the raw token only — **no** `Bearer ` prefix;
+     the prefix is added in the Named Credential's Custom Header, step 2 below)
 3. Save.
 
 The PAT lives only on this principal — it is never stored in Apex, Custom
@@ -45,16 +46,39 @@ Metadata, or version control.
 
 | Field | Value |
 |---|---|
-| Label | `Asana` |
-| Name | `Asana` |
+| Label | `Asana API` |
+| Name | `Asana_API` |
 | URL | `https://app.asana.com/api/1.0` |
-| External Credential | `Asana` (the one created in step 1) |
-| Generate Authorization Header | checked |
-| Allow Formulas in HTTP Header | unchecked (not needed) |
+| External Credential | `Asana API` (the one created in step 1) |
+| Allow Formulas in HTTP Header | **checked — required** (see note below) |
 
-Save. `AsanaTaskService` calls `callout:Asana/tasks`, `callout:Asana/tasks/{gid}`,
-etc. — the base URL above is prepended automatically, so paths in Apex must
-start with `/`.
+Save. `AsanaTaskService` calls `callout:Asana_API/tasks`,
+`callout:Asana_API/tasks/{gid}`, etc. — the base URL above is prepended
+automatically, so paths in Apex must start with `/`. If you ever rename the
+Named Credential, update `NAMED_CREDENTIAL` in `AsanaTaskService.cls` to match
+— the two are not otherwise validated against each other, and a mismatch
+fails with a callout exception ("named credential might not exist"), not an
+auth error.
+
+**Note on "Generate Authorization Header":** this checkbox has no effect for
+`Custom` authentication protocol — it only auto-builds a header for
+protocols like OAuth where Salesforce knows the token shape. For `Custom`,
+you must add the header explicitly:
+
+Under **Custom Headers**, click **New**:
+
+| Field | Value |
+|---|---|
+| Name | `Authorization` |
+| Value | `Bearer {!$Credential.Asana_API.Authorization}` |
+| Sequence Number | `1` |
+
+The `{!$Credential.Asana_API.Authorization}` merge field pulls the raw token
+from the External Credential principal parameter at callout time — the
+secret itself never leaves the External Credential's protected storage, and
+this Custom Header value (which is visible in Setup/metadata, unlike the
+principal parameter) never contains the actual token, just the formula
+reference to it.
 
 ## 3. Grant Principal Access (required — easy to miss)
 
@@ -65,8 +89,8 @@ Credential and External Credential are configured correctly.
 **Setup → Permission Sets** (or use an existing one assigned to integration users):
 
 1. Open the Permission Set the running user (or automated process) has assigned.
-2. **External Credential Principal Access** → Edit → add the `Asana` /
-   `AsanaPrincipal` principal from step 1.
+2. **External Credential Principal Access** → Edit → add the `Asana API` /
+   `AsanaIntegration` principal from step 1.
 3. Save and confirm the Permission Set is assigned to the user who will
    trigger the callout (whoever saves/updates the Opportunity, since the
    Queueable runs in that user's context).
@@ -77,7 +101,11 @@ Run the direct callout test in
 [testing-and-logs.md](testing-and-logs.md#direct-callout-test-execute-anonymous).
 A `401` at this stage almost always means either the PAT is invalid/expired
 (step 1) or the running user's Permission Set isn't mapped to the principal
-(step 3) — not a code issue.
+(step 3) — not a code issue. A callout exception mentioning the named
+credential "might not exist" instead means the Named Credential's API name
+(step 2) doesn't match `NAMED_CREDENTIAL` in `AsanaTaskService.cls` — check
+for a typo/rename drift between the two, since nothing validates them
+against each other automatically.
 
 ## Rotating the PAT
 
@@ -87,7 +115,8 @@ To rotate:
 
 1. Generate a new PAT at https://app.asana.com/0/my-apps.
 2. Go back to the External Credential (step 1) → open the principal → update
-   the `Authorization` parameter value to `Bearer <NEW_PAT>`.
+   the `Authorization` parameter value to `<NEW_PAT>` (raw token, no `Bearer `
+   prefix — that prefix lives in the Named Credential's Custom Header, not here).
 3. Revoke the old PAT in Asana.
 4. Re-run the verification test in step 4.
 
