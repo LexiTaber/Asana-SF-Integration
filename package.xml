@@ -8,10 +8,16 @@
         <members>AsanaTaskServiceTest</members>
         <members>OpportunityAsanaSyncHandler</members>
         <members>OpportunityAsanaSyncHandlerTest</members>
+        <members>AccountStampSFilesFolderField_Queueable</members>
+        <members>AccountStampSFilesFolderField_QueueTest</members>
+        <members>Opportunity_Utils</members>
+        <members>Opportunity_UtilsTest</members>
         <name>ApexClass</name>
     </types>
     <types>
         <members>Opportunity.Asana_Task_GID__c</members>
+        <members>Account.SharePoint_Folder_ID_Client_sFiles__c</members>
+        <members>Account.SharePoint_Folder_ID_Funder_sFiles__c</members>
         <name>CustomField</name>
     </types>
     <types>
@@ -21,6 +27,15 @@
     <types>
         <members>OpportunityTrigger</members>
         <name>ApexTrigger</name>
+    </types>
+    <types>
+        <members>Automatic_Object_Folder_Sync__mdt</members>
+        <name>CustomObject</name>
+    </types>
+    <types>
+        <members>Automatic_Object_Folder_Sync.Campaign</members>
+        <members>Automatic_Object_Folder_Sync.Opportunity</members>
+        <name>CustomMetadata</name>
     </types>
     <version>62.0</version>
 </Package>
