@@ -15,7 +15,10 @@ public with sharing class AsanaTaskService {
     private static final String NAMED_CREDENTIAL = 'callout:Asana_API';
     private static final String PROJECT_GID = '1213427513705845';
 
-    // Custom field GIDs (Loan Onboarding Tracker 2.0)
+    // Custom field GIDs. The task is created in Loan Onboarding Tracker 2.0 but
+    // stays on one gid as Asana Rules add it to downstream projects (Active Loans 2.0,
+    // Loan Maturities 2.0, Loan Payoff Tracking, etc.), so fields owned by those
+    // projects (e.g. CF_PAID_OFF_DATE) can still be set here.
     private static final String CF_LOAN_NUMBER     = '1213472337751772';
     private static final String CF_MATURITY_DATE   = '1213472337751784';
     private static final String CF_OUTSTANDING_AMT = '1213472337751908';
@@ -25,6 +28,8 @@ public with sharing class AsanaTaskService {
     private static final String CF_LOAN_FUND       = '1215983658524794';
     private static final String CF_PARTICIPATION   = '1215983686119784';
     private static final String CF_LEAD_LENDER     = '1216018561523010';
+    private static final String CF_PAID_OFF_DATE   = '1218421167420225';
+    private static final String CF_PARTICIPATION_TYPE = '1218783762811670';
 
     public class AsanaException extends Exception {}
 
@@ -73,19 +78,31 @@ public with sharing class AsanaTaskService {
         }
 
         Map<String, Object> customFields = new Map<String, Object>();
-        customFields.put(CF_LOAN_NUMBER,     asString(opp.Colson_Number__c));
-        customFields.put(CF_MATURITY_DATE,   asDateValue(opp.Maturity_Date__c));
-        customFields.put(CF_OUTSTANDING_AMT, opp.Outstanding_Amount__c);
-        customFields.put(CF_SF_STAGE,        asString(opp.StageName));
-        customFields.put(CF_OPP_OWNER_TEXT,  asString(opp.Opportunity_Owner_Name__c));
-        customFields.put(CF_CLOSE_DATE,      asDateValue(opp.Close_Date__c));
-        customFields.put(CF_LOAN_FUND,       asString(opp.TEA_Loan_Fund__c));
-        customFields.put(CF_PARTICIPATION,   asString(opp.Participation_Loan1__c));
-        customFields.put(CF_LEAD_LENDER,     asString(opp.getSObject('Lead_Participant__r')?.get('Name')));
+        putIfNotNull(customFields, CF_LOAN_NUMBER,     asString(opp.Colson_Number__c));
+        putIfNotNull(customFields, CF_MATURITY_DATE,   asDateValue(opp.Maturity_Date__c));
+        putIfNotNull(customFields, CF_OUTSTANDING_AMT, opp.Outstanding_Amount__c);
+        putIfNotNull(customFields, CF_SF_STAGE,        asString(opp.StageName));
+        putIfNotNull(customFields, CF_OPP_OWNER_TEXT,  asString(opp.Opportunity_Owner_Name__c));
+        putIfNotNull(customFields, CF_CLOSE_DATE,      asDateValue(opp.Close_Date__c));
+        putIfNotNull(customFields, CF_LOAN_FUND,       asString(opp.TEA_Loan_Fund__c));
+        putIfNotNull(customFields, CF_PARTICIPATION,   asString(opp.Participation_Loan1__c));
+        putIfNotNull(customFields, CF_LEAD_LENDER,     asString(opp.getSObject('Lead_Participant__r')?.get('Name')));
+        putIfNotNull(customFields, CF_PARTICIPATION_TYPE, asString(opp.Participation_Type__c));
+        putIfNotNull(customFields, CF_PAID_OFF_DATE,   asDateValue(opp.Paid_off_Date__c));
 
         data.put('custom_fields', customFields);
 
         return JSON.serialize(new Map<String, Object>{ 'data' => data }, true /* suppress nulls */);
+    }
+
+    // JSON.serialize's suppressNulls only omits null *fields* on typed objects/sObjects,
+    // not null *entries* in a Map<String, Object> like custom_fields - a null value here
+    // would still serialize as an explicit "key": null, which would clear whatever value
+    // that field already holds in Asana. Keeping the key out of the map entirely instead.
+    private static void putIfNotNull(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private static String asString(Object o) {

@@ -531,7 +531,7 @@ private class OpportunityAsanaSyncHandlerTest {
         System.assertEquals(1, mock.putCount(), 'A tracked-field change should trigger exactly one UPDATE_TASK callout');
 
         HttpRequest putReq = mock.lastPut();
-        System.assertEquals('callout:Asana/tasks/600000001', putReq.getEndpoint());
+        System.assertEquals('callout:Asana_API/tasks/600000001', putReq.getEndpoint());
 
         Map<String, Object> body = (Map<String, Object>) JSON.deserializeUntyped(putReq.getBody());
         Map<String, Object> cf = (Map<String, Object>) ((Map<String, Object>) body.get('data')).get('custom_fields');
@@ -708,7 +708,7 @@ private class OpportunityAsanaSyncHandlerTest {
         // task GID's endpoint (i.e. it didn't get mixed up with the
         // create-path record's brand-new task).
         HttpRequest putReq = mock.lastPut();
-        System.assertEquals('callout:Asana/tasks/600000006', putReq.getEndpoint(),
+        System.assertEquals('callout:Asana_API/tasks/600000006', putReq.getEndpoint(),
             'The update-path record\'s PUT should target its own pre-existing GID (600000006), not the ' +
             'other record\'s newly created one');
 

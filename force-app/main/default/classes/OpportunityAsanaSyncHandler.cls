@@ -33,7 +33,9 @@ public with sharing class OpportunityAsanaSyncHandler {
         'Close_Date__c',
         'TEA_Loan_Fund__c',
         'Participation_Loan1__c',
-        'Lead_Participant__c'
+        'Lead_Participant__c',
+        'Participation_Type__c',
+        'Paid_off_Date__c'
     };
 
     // Cached per transaction

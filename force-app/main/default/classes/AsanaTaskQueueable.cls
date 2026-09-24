@@ -29,7 +29,7 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
                    Colson_Number__c, Maturity_Date__c, Outstanding_Amount__c,
                    StageName, Opportunity_Owner_Name__c, Close_Date__c,
                    TEA_Loan_Fund__c, Participation_Loan1__c, Lead_Participant__c,
-                   Lead_Participant__r.Name
+                   Lead_Participant__r.Name, Participation_Type__c, Paid_off_Date__c
             FROM Opportunity
             WHERE Id IN :opportunityIds
         ];

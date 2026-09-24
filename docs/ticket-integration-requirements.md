@@ -23,7 +23,7 @@ Replace the Asana-managed Rules entirely with Apex The Salesforce side owns the 
 
 ### Task Updates
 - When an Opportunity already has an `Asana_Task_GID__c` and any of the following fields change, the corresponding Asana task is updated via PUT:
-  - `Name`, `Colson_Number__c`, `Maturity_Date__c`, `Outstanding_Amount__c`, `StageName`, `Opportunity_Owner_Name__c`, `CloseDate`, `TEA_Loan_Fund__c`, `Participation_Loan1__c`, `Lead_Participant__c`
+  - `Name`, `Colson_Number__c`, `Maturity_Date__c`, `Outstanding_Amount__c`, `StageName`, `Opportunity_Owner_Name__c`, `CloseDate`, `TEA_Loan_Fund__c`, `Participation_Loan1__c`, `Lead_Participant__c`, `Participation_Type__c`, `Paid_off_Date__c`
 
 ### Field Mapping
 | Salesforce Field | Asana Custom Field GID | Asana Field Type |
@@ -37,6 +37,8 @@ Replace the Asana-managed Rules entirely with Apex The Salesforce side owns the 
 | `TEA_Loan_Fund__c` | `1215983658524794` | text (formula — read-only in SF) |
 | `Participation_Loan1__c` | `1215983686119784` | text |
 | `Lead_Participant__c` | `1216018561523010` | text |
+| `Participation_Type__c` | `1218783762811670` | text |
+| `Paid_off_Date__c` | `1218421167420225` | date |
 
 The Opportunity `Name` is used as the Asana task name on create only.
 

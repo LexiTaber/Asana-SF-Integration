@@ -80,9 +80,13 @@ Same structure without `name` or `projects` — only `custom_fields`.
 
 **Date field format:** Asana date custom fields require a JSON object `{"date": "YYYY-MM-DD"}`, not a plain string. The `asDateValue()` helper produces this format. Plain strings are rejected by the API with a 400 error.
 
-**Null handling:** `JSON.serialize(..., true)` is used with suppress-nulls enabled. Fields with null values are omitted from the payload rather than sent as `null`, which prevents accidentally clearing Asana fields that aren't mapped.
+**Null handling:** Each `customFields.put(...)` call goes through a `putIfNotNull()` helper that skips the entry entirely when the value is null, so a blank Salesforce field is omitted from the payload rather than sent as `null` (which would clear whatever value that field already holds in Asana). This is enforced explicitly in `buildPayload()` rather than left to `JSON.serialize(..., true)`'s suppress-nulls flag — that flag only omits null *fields* on typed objects/sObjects, not null *entries* in a `Map<String, Object>` like `custom_fields`, so it silently did not apply here. (Found via `AsanaTaskServiceTest`'s payload-inspection tests for `Participation_Type__c`/`Paid_off_Date__c` — every other optional field had the same latent gap, now fixed for all of them.)
 
 **Custom field GID constants:** Defined as private `static final String` constants at the top of the class. If field GIDs change in Asana (e.g., fields are deleted and recreated), update the constants here. If the field mapping grows significantly, consider migrating to Custom Metadata.
+
+**Multi-project note:** `CF_PAID_OFF_DATE` belongs to the Loan Payoff Tracking project, not Loan Onboarding Tracker 2.0 where the task is created. This works because the task stays on one `gid` as Asana Rules add it to downstream projects over the loan's lifecycle (Active Loans 2.0, Loan Maturities 2.0, Loan Payoff Tracking, etc.), carrying every previously-synced custom field value with it — so `updateTask()` can set a field owned by any of those projects without any project-specific branching in Apex.
+
+**`CF_PARTICIPATION_TYPE` (`1218783762811670`)** maps to the "Participation Type (SF)" field on Loan Onboarding Tracker 2.0, created 9/24/2026. See [ticket-participation-type-sync-requirements.md](ticket-participation-type-sync-requirements.md) — the Asana Rule that computes "Participation Type (formula)" from this field still needs updating by Ops.
 
 **Error handling:** Any non-2xx HTTP response throws `AsanaException`. The caller (queueable) is responsible for catching it.
 
@@ -97,6 +101,10 @@ The test class for `AsanaTaskService`. It uses an `HttpCalloutMock` implementati
 - `updateTask_success_noException` — 200 response completes without error
 - `updateTask_missingGid_throws` — calling `updateTask` on an Opp with no GID throws `AsanaException`
 - `createTask_apiError_throws` — 400 response throws `AsanaException`
+- `updateTask_participationTypeSold_includedInPayload` / `updateTask_participationTypeBlank_omittedFromPayload` — `Participation_Type__c` is sent when set, omitted when blank
+- `updateTask_paidOffDate_includedInPayload_correctDateShape` / `updateTask_paidOffDateBlank_omittedFromPayload` — `Paid_off_Date__c` is sent in `{"date": "YYYY-MM-DD"}` shape when set, omitted when blank
+
+These four tests capture the outbound request body via `AsanaMock.lastRequestBody` (added alongside them) rather than only inspecting the canned response — the earlier tests only needed to check `createTask`'s return value or that no exception was thrown, but asserting on payload *contents* requires seeing what was actually sent.
 
 **What is NOT covered (known gap):**
 - `OpportunityTrigger` — 0% coverage

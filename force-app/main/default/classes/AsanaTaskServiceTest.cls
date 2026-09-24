@@ -87,16 +87,100 @@ private class AsanaTaskServiceTest {
     private class AsanaMock implements HttpCalloutMock {
         private Integer status;
         private String body;
+        public String lastRequestBody;
         public AsanaMock(Integer status, String body) {
             this.status = status;
             this.body = body;
         }
         public HttpResponse respond(HttpRequest req) {
+            lastRequestBody = req.getBody();
             HttpResponse res = new HttpResponse();
             res.setStatusCode(status);
             res.setBody(body);
             res.setHeader('Content-Type', 'application/json');
             return res;
         }
+    }
+
+    // Custom field GIDs mirrored from AsanaTaskService for payload assertions.
+    private static final String CF_PARTICIPATION_TYPE = '1218783762811670';
+    private static final String CF_PAID_OFF_DATE = '1218421167420225';
+
+    private static Map<String, Object> customFieldsFromPayload(String requestBody) {
+        Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(requestBody);
+        Map<String, Object> data = (Map<String, Object>) parsed.get('data');
+        return (Map<String, Object>) data.get('custom_fields');
+    }
+
+    @isTest
+    static void updateTask_participationTypeSold_includedInPayload() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp();
+        opp.Asana_Task_GID__c = '1234567890';
+        opp.Participation_Loan1__c = 'Yes';
+        opp.put('Participation_Type__c', 'Sold');
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        System.assertEquals('Sold', customFields.get(CF_PARTICIPATION_TYPE),
+            'Participation_Type__c should be sent as-is to Asana');
+    }
+
+    @isTest
+    static void updateTask_participationTypeBlank_omittedFromPayload() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp(); // Participation_Loan1__c = 'No', Participation_Type__c left blank
+        opp.Asana_Task_GID__c = '1234567890';
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        System.assert(!customFields.containsKey(CF_PARTICIPATION_TYPE),
+            'Blank Participation_Type__c should be omitted, not sent as null');
+    }
+
+    @isTest
+    static void updateTask_paidOffDate_includedInPayload_correctDateShape() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp();
+        opp.Asana_Task_GID__c = '1234567890';
+        opp.put('Paid_off_Date__c', Date.newInstance(2026, 9, 30));
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        Map<String, Object> dateValue = (Map<String, Object>) customFields.get(CF_PAID_OFF_DATE);
+        System.assertEquals('2026-09-30', dateValue.get('date'),
+            'Paid_off_Date__c should be sent as {"date": "YYYY-MM-DD"}, matching other date fields');
+    }
+
+    @isTest
+    static void updateTask_paidOffDateBlank_omittedFromPayload() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp(); // Paid_off_Date__c left blank
+        opp.Asana_Task_GID__c = '1234567890';
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        System.assert(!customFields.containsKey(CF_PAID_OFF_DATE),
+            'Blank Paid_off_Date__c should be omitted, not sent as null');
     }
 }
