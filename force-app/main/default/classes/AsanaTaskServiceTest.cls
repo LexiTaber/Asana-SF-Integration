@@ -84,20 +84,46 @@ private class AsanaTaskServiceTest {
         return opp;
     }
 
+    // updateTask() first GETs the task's custom fields, then PUTs. The GET answers
+    // with taskFieldGids (every synced field by default, i.e. a task still in Loan
+    // Onboarding Tracker 2.0 that has also reached Loan Payoff Tracking); the PUT
+    // answers with status/body and is the request lastRequestBody captures.
     private class AsanaMock implements HttpCalloutMock {
         private Integer status;
         private String body;
         public String lastRequestBody;
+        public Set<String> taskFieldGids = new Set<String>(ALL_SYNCED_FIELD_GIDS);
         public AsanaMock(Integer status, String body) {
             this.status = status;
             this.body = body;
         }
         public HttpResponse respond(HttpRequest req) {
-            lastRequestBody = req.getBody();
             HttpResponse res = new HttpResponse();
+            res.setHeader('Content-Type', 'application/json');
+            if (req.getMethod() == 'GET') {
+                List<Object> fields = new List<Object>();
+                for (String gid : taskFieldGids) {
+                    fields.add(new Map<String, Object>{ 'gid' => gid });
+                }
+                res.setStatusCode(200);
+                res.setBody(JSON.serialize(new Map<String, Object>{
+                    'data' => new Map<String, Object>{ 'custom_fields' => fields }
+                }));
+                return res;
+            }
+            lastRequestBody = req.getBody();
             res.setStatusCode(status);
             res.setBody(body);
-            res.setHeader('Content-Type', 'application/json');
+            return res;
+        }
+    }
+
+    private class FailingGetMock implements HttpCalloutMock {
+        public HttpResponse respond(HttpRequest req) {
+            System.assertEquals('GET', req.getMethod(), 'No PUT should be attempted after the lookup fails');
+            HttpResponse res = new HttpResponse();
+            res.setStatusCode(404);
+            res.setBody('{"errors":[{"message":"Not found"}]}');
             return res;
         }
     }
@@ -105,6 +131,16 @@ private class AsanaTaskServiceTest {
     // Custom field GIDs mirrored from AsanaTaskService for payload assertions.
     private static final String CF_PARTICIPATION_TYPE = '1218783762811670';
     private static final String CF_PAID_OFF_DATE = '1218421167420225';
+    private static final String CF_SF_STAGE = '1213472337751766';
+    private static final String CF_PARTICIPATION_TYPE_FORMULA = '1215987679220031';
+    private static final String OPT_NFF_LEAD_NO_PARTICIPATION = '1215987679220032';
+    private static final String OPT_NFF_PARTICIPANT = '1215987679220033';
+
+    private static final Set<String> ALL_SYNCED_FIELD_GIDS = new Set<String>{
+        '1213472337751772', '1213472337751784', '1213472337751908', CF_SF_STAGE,
+        '1213558974165924', '1213558974165918', '1215983658524794', '1215983686119784',
+        '1216018561523010', CF_PAID_OFF_DATE, CF_PARTICIPATION_TYPE, CF_PARTICIPATION_TYPE_FORMULA
+    };
 
     private static Map<String, Object> customFieldsFromPayload(String requestBody) {
         Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(requestBody);
@@ -182,5 +218,102 @@ private class AsanaTaskServiceTest {
         Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
         System.assert(!customFields.containsKey(CF_PAID_OFF_DATE),
             'Blank Paid_off_Date__c should be omitted, not sent as null');
+    }
+
+    // ---------- Participation Type (formula), set directly from SF ----------
+
+    @isTest
+    static void participationTypeOption_matchesLsLogic() {
+        Opportunity opp = buildOpp();
+
+        opp.Participation_Loan1__c = 'No';
+        System.assertEquals(OPT_NFF_LEAD_NO_PARTICIPATION, AsanaTaskService.participationTypeOptionGid(opp),
+            'Participation Loan = No -> NFF Lead/No Participation');
+
+        opp.Participation_Loan1__c = 'Yes';
+        opp.put('Participation_Type__c', 'Sold');
+        System.assertEquals(OPT_NFF_LEAD_NO_PARTICIPATION, AsanaTaskService.participationTypeOptionGid(opp),
+            'Yes + Sold (NFF is lead and sold a piece) -> NFF Lead/No Participation');
+
+        opp.put('Participation_Type__c', 'Purchased');
+        System.assertEquals(OPT_NFF_PARTICIPANT, AsanaTaskService.participationTypeOptionGid(opp),
+            'Yes + Purchased -> NFF Participant');
+
+        opp.put('Participation_Type__c', null);
+        System.assertEquals(null, AsanaTaskService.participationTypeOptionGid(opp),
+            'Yes with no Sold/Purchased yet is undetermined - leave Asana alone');
+
+        opp.Participation_Loan1__c = null;
+        System.assertEquals(null, AsanaTaskService.participationTypeOptionGid(opp),
+            'Blank Participation Loan is undetermined - leave Asana alone');
+    }
+
+    @isTest
+    static void updateTask_participationSold_setsFormulaFieldToNffLead() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp();
+        opp.Asana_Task_GID__c = '1234567890';
+        opp.Participation_Loan1__c = 'Yes';
+        opp.put('Participation_Type__c', 'Sold');
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        System.assertEquals(OPT_NFF_LEAD_NO_PARTICIPATION, customFields.get(CF_PARTICIPATION_TYPE_FORMULA),
+            'Sold loans must land as NFF Lead/No Participation without relying on the Asana Rule');
+    }
+
+    // The 10/2026 prod bug: once a task moves from Loan Onboarding Tracker 2.0 to
+    // Active Loans 2.0 it no longer has Participation Type (SF) (and may not have
+    // Paid Off Date), and sending either blocked the whole update.
+    @isTest
+    static void updateTask_taskLeftOnboardingProject_omitsFieldsTaskDoesNotHave() {
+        AsanaMock mock = new AsanaMock(200, '{"data":{"gid":"1234567890"}}');
+        mock.taskFieldGids.remove(CF_PARTICIPATION_TYPE);
+        mock.taskFieldGids.remove(CF_PAID_OFF_DATE);
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp = buildOpp();
+        opp.Asana_Task_GID__c = '1234567890';
+        opp.StageName = 'Paid Off';
+        opp.Participation_Loan1__c = 'Yes';
+        opp.put('Participation_Type__c', 'Sold');
+        opp.put('Paid_off_Date__c', Date.newInstance(2026, 9, 23));
+
+        Test.startTest();
+        AsanaTaskService.updateTask(opp);
+        Test.stopTest();
+
+        Map<String, Object> customFields = customFieldsFromPayload(mock.lastRequestBody);
+        System.assert(!customFields.containsKey(CF_PARTICIPATION_TYPE),
+            'Participation Type (SF) is not on the task, so it must not be sent');
+        System.assert(!customFields.containsKey(CF_PAID_OFF_DATE),
+            'Paid Off Date is not on the task, so it must not be sent');
+        System.assertEquals('Paid Off', customFields.get(CF_SF_STAGE),
+            'Fields the task does have must still be sent');
+        System.assertEquals(OPT_NFF_LEAD_NO_PARTICIPATION, customFields.get(CF_PARTICIPATION_TYPE_FORMULA));
+    }
+
+    @isTest
+    static void updateTask_taskLookupFails_throwsWithoutPut() {
+        Test.setMock(HttpCalloutMock.class, new FailingGetMock());
+
+        Opportunity opp = buildOpp();
+        opp.Asana_Task_GID__c = '1234567890';
+        Boolean threw = false;
+
+        Test.startTest();
+        try {
+            AsanaTaskService.updateTask(opp);
+        } catch (AsanaTaskService.AsanaException e) {
+            threw = true;
+        }
+        Test.stopTest();
+
+        System.assert(threw, 'A failed task lookup (e.g. deleted task) should surface as AsanaException');
     }
 }

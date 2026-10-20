@@ -51,7 +51,7 @@ private class AsanaTaskQueueableTest {
     }
 
     private static Opportunity buildOpportunity(String name, String gid) {
-        Account leadParticipant = new Account(Name = 'Test Lead Bank ' + name);
+        Account leadParticipant = new Account(Name = 'Test Lead Bank ' + name, BillingState = 'NY');
         insert leadParticipant;
 
         // Opportunity_Owner_Name__c and TEA_Loan_Fund__c are FORMULA fields
@@ -139,7 +139,7 @@ private class AsanaTaskQueueableTest {
         ));
         Test.stopTest();
 
-        System.assertEquals(1, mock.callCount, 'UPDATE_TASK should still make one callout to Asana');
+        System.assertEquals(2, mock.callCount, 'UPDATE_TASK should read the task\'s fields, then PUT');
         System.assertEquals('PUT', mock.lastRequest().getMethod());
 
         Opportunity refreshed = [SELECT Asana_Task_GID__c, LastModifiedDate FROM Opportunity WHERE Id = :opp.Id];
@@ -166,6 +166,28 @@ private class AsanaTaskQueueableTest {
         Test.stopTest();
 
         System.assert(true, 'Reaching this line means the queueable absorbed the callout failure without throwing');
+    }
+
+    @isTest
+    static void testUpdateMode_overJobCap_processesCapAndChainsRemainder() {
+        AsanaCalloutMockTest mock = new AsanaCalloutMockTest();
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Opportunity opp1 = buildOpportunity('ChunkA', '555555551');
+        Opportunity opp2 = buildOpportunity('ChunkB', '555555552');
+        AsanaTaskQueueable.maxOppsPerJob = 1;
+
+        Test.startTest();
+        System.enqueueJob(new AsanaTaskQueueable(
+            new List<Id>{ opp1.Id, opp2.Id },
+            AsanaTaskQueueable.Mode.UPDATE_TASK
+        ));
+        Test.stopTest();
+
+        System.assertEquals(1, mock.putCount(),
+            'Only maxOppsPerJob Opportunities should be updated in one job');
+        System.assertEquals(new List<Id>{ opp2.Id }, AsanaTaskQueueable.chainedRemainder,
+            'The rest should be handed to a follow-up job');
     }
 
     @isTest

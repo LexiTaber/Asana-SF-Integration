@@ -15,6 +15,13 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
 
     public enum Mode { CREATE_TASK, UPDATE_TASK }
 
+    // Each UPDATE_TASK makes 2 callouts (read the task's fields, then PUT), against a
+    // 100-callout limit per job. Anything past this is chained to a follow-up job.
+    @TestVisible
+    private static Integer maxOppsPerJob = 45;
+    @TestVisible
+    private static List<Id> chainedRemainder;
+
     private List<Id> opportunityIds;
     private Mode taskMode;
 
@@ -24,6 +31,24 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
     }
 
     public void execute(QueueableContext ctx) {
+        if (opportunityIds.size() > maxOppsPerJob) {
+            List<Id> thisJob = new List<Id>();
+            List<Id> remainder = new List<Id>();
+            for (Id oppId : opportunityIds) {
+                if (thisJob.size() < maxOppsPerJob) {
+                    thisJob.add(oppId);
+                } else {
+                    remainder.add(oppId);
+                }
+            }
+            opportunityIds = thisJob;
+            chainedRemainder = remainder;
+            // Apex tests can't chain queueables - tests assert on chainedRemainder instead
+            if (!Test.isRunningTest()) {
+                System.enqueueJob(new AsanaTaskQueueable(remainder, taskMode));
+            }
+        }
+
         List<Opportunity> opps = [
             SELECT Id, Name, Asana_Task_GID__c,
                    Colson_Number__c, Maturity_Date__c, Outstanding_Amount__c,

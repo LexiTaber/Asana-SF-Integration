@@ -17,8 +17,12 @@ public with sharing class AsanaTaskService {
 
     // Custom field GIDs. The task is created in Loan Onboarding Tracker 2.0 but
     // stays on one gid as Asana Rules add it to downstream projects (Active Loans 2.0,
-    // Loan Maturities 2.0, Loan Payoff Tracking, etc.), so fields owned by those
-    // projects (e.g. CF_PAID_OFF_DATE) can still be set here.
+    // Loan Maturities 2.0, Loan Payoff Tracking, etc.) - and is usually REMOVED from
+    // Loan Onboarding Tracker 2.0 along the way. Not every field exists on every one
+    // of those projects (e.g. CF_PARTICIPATION_TYPE only lives on Loan Onboarding
+    // Tracker 2.0, CF_PAID_OFF_DATE only on Loan Payoff Tracking), so updateTask()
+    // reads which fields the task actually has before writing - see
+    // dropFieldsNotOnTask().
     private static final String CF_LOAN_NUMBER     = '1213472337751772';
     private static final String CF_MATURITY_DATE   = '1213472337751784';
     private static final String CF_OUTSTANDING_AMT = '1213472337751908';
@@ -30,6 +34,15 @@ public with sharing class AsanaTaskService {
     private static final String CF_LEAD_LENDER     = '1216018561523010';
     private static final String CF_PAID_OFF_DATE   = '1218421167420225';
     private static final String CF_PARTICIPATION_TYPE = '1218783762811670';
+
+    // "Participation Type (formula)" - the visible enum LS actually reads. It used to
+    // be computed by an Asana Rule from CF_PARTICIPATION/CF_PARTICIPATION_TYPE, but
+    // that Rule only runs on tasks still in Loan Onboarding Tracker 2.0, so tasks
+    // that had moved downstream never got corrected. Set directly here instead,
+    // since this field is on every project the task moves through.
+    private static final String CF_PARTICIPATION_TYPE_FORMULA = '1215987679220031';
+    private static final String OPT_NFF_LEAD_NO_PARTICIPATION = '1215987679220032';
+    private static final String OPT_NFF_PARTICIPANT           = '1215987679220033';
 
     public class AsanaException extends Exception {}
 
@@ -44,16 +57,54 @@ public with sharing class AsanaTaskService {
         if (String.isBlank(opp.Asana_Task_GID__c)) {
             throw new AsanaException('Cannot update: no Asana_Task_GID__c on Opp ' + opp.Id);
         }
+        Set<String> fieldsOnTask = getTaskCustomFieldGids(opp.Asana_Task_GID__c);
         HttpRequest req = buildRequest(
             '/tasks/' + opp.Asana_Task_GID__c,
             'PUT',
-            buildPayload(opp, false)
+            buildPayload(opp, false, fieldsOnTask)
         );
         HttpResponse res = new Http().send(req);
         validate(res);
     }
 
+    // Maps SF's two participation fields onto the "Participation Type (formula)"
+    // enum option, per LS's logic (Ben Zimmitti, 9/15/2026). Returns null when it
+    // can't be determined (Yes with no Sold/Purchased yet, or Participation Loan
+    // blank) so the field is left as-is rather than guessed.
+    @TestVisible
+    private static String participationTypeOptionGid(Opportunity opp) {
+        if (opp.Participation_Loan1__c == 'No') return OPT_NFF_LEAD_NO_PARTICIPATION;
+        if (opp.Participation_Loan1__c == 'Yes') {
+            if (opp.Participation_Type__c == 'Sold') return OPT_NFF_LEAD_NO_PARTICIPATION;
+            if (opp.Participation_Type__c == 'Purchased') return OPT_NFF_PARTICIPANT;
+        }
+        return null;
+    }
+
     // ---------- internal ----------
+
+    // Returns the gids of the custom fields the task currently has (the union of
+    // its projects' fields), or null if Asana's response doesn't list them.
+    private static Set<String> getTaskCustomFieldGids(String taskGid) {
+        HttpRequest req = buildRequest(
+            '/tasks/' + taskGid + '?opt_fields=custom_fields.gid',
+            'GET',
+            null
+        );
+        HttpResponse res = new Http().send(req);
+        validate(res);
+
+        Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+        Map<String, Object> data = (Map<String, Object>) parsed.get('data');
+        List<Object> customFields = data == null ? null : (List<Object>) data.get('custom_fields');
+        if (customFields == null) return null;
+
+        Set<String> gids = new Set<String>();
+        for (Object cf : customFields) {
+            gids.add((String) ((Map<String, Object>) cf).get('gid'));
+        }
+        return gids;
+    }
 
     private static HttpRequest buildRequest(String path, String method, String body) {
         HttpRequest req = new HttpRequest();
@@ -61,12 +112,18 @@ public with sharing class AsanaTaskService {
         req.setMethod(method);
         req.setHeader('Content-Type', 'application/json');
         req.setHeader('Accept', 'application/json');
-        req.setBody(body);
+        if (body != null) {
+            req.setBody(body);
+        }
         req.setTimeout(60000);
         return req;
     }
 
     private static String buildPayload(Opportunity opp, Boolean isCreate) {
+        return buildPayload(opp, isCreate, null);
+    }
+
+    private static String buildPayload(Opportunity opp, Boolean isCreate, Set<String> fieldsOnTask) {
         Map<String, Object> data = new Map<String, Object>();
 
         if (isCreate) {
@@ -89,6 +146,11 @@ public with sharing class AsanaTaskService {
         putIfNotNull(customFields, CF_LEAD_LENDER,     asString(opp.getSObject('Lead_Participant__r')?.get('Name')));
         putIfNotNull(customFields, CF_PARTICIPATION_TYPE, asString(opp.Participation_Type__c));
         putIfNotNull(customFields, CF_PAID_OFF_DATE,   asDateValue(opp.Paid_off_Date__c));
+        putIfNotNull(customFields, CF_PARTICIPATION_TYPE_FORMULA, participationTypeOptionGid(opp));
+
+        if (fieldsOnTask != null) {
+            dropFieldsNotOnTask(customFields, fieldsOnTask, opp);
+        }
 
         data.put('custom_fields', customFields);
 
@@ -99,6 +161,19 @@ public with sharing class AsanaTaskService {
     // not null *entries* in a Map<String, Object> like custom_fields - a null value here
     // would still serialize as an explicit "key": null, which would clear whatever value
     // that field already holds in Asana. Keeping the key out of the map entirely instead.
+    // Asana rejects the WHOLE update if it names a custom field the task doesn't have
+    // (e.g. Participation Type (SF) once the task has left Loan Onboarding Tracker 2.0),
+    // so one project-specific field would otherwise block every other field too.
+    private static void dropFieldsNotOnTask(Map<String, Object> customFields, Set<String> fieldsOnTask, Opportunity opp) {
+        for (String gid : new List<String>(customFields.keySet())) {
+            if (!fieldsOnTask.contains(gid)) {
+                customFields.remove(gid);
+                System.debug(LoggingLevel.INFO, 'Asana task ' + opp.Asana_Task_GID__c + ' (Opp ' + opp.Id
+                    + ') has no custom field ' + gid + ' on its current projects - skipped');
+            }
+        }
+    }
+
     private static void putIfNotNull(Map<String, Object> target, String key, Object value) {
         if (value != null) {
             target.put(key, value);

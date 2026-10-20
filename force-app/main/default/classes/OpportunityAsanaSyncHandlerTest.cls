@@ -148,7 +148,7 @@ private class OpportunityAsanaSyncHandlerTest {
     // We set the driving fields here and read the computed formula values
     // back from the database (via SOQL) wherever we need to assert on them.
     private static Opportunity buildBaselineOpp(String name, Id recordTypeId, String stage, String gid) {
-        Account leadParticipant = new Account(Name = 'Lead Bank ' + name);
+        Account leadParticipant = new Account(Name = 'Lead Bank ' + name, BillingState = 'NY');
         insert leadParticipant;
 
         return new Opportunity(
@@ -501,7 +501,7 @@ private class OpportunityAsanaSyncHandlerTest {
         // change their DRIVING fields (OwnerId, Primary_Funding_Project__c)
         // and re-query the computed results after the update to know what
         // Asana should have received - rather than guessing the formula output.
-        Account newLead = new Account(Name = 'New Lead Bank');
+        Account newLead = new Account(Name = 'New Lead Bank', BillingState = 'NY');
         insert newLead;
         Id newOwnerId = secondActiveUserId();
 
