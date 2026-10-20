@@ -31,9 +31,9 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
     }
 
     public void execute(QueueableContext ctx) {
+        List<Id> remainder = new List<Id>();
         if (opportunityIds.size() > maxOppsPerJob) {
             List<Id> thisJob = new List<Id>();
-            List<Id> remainder = new List<Id>();
             for (Id oppId : opportunityIds) {
                 if (thisJob.size() < maxOppsPerJob) {
                     thisJob.add(oppId);
@@ -43,10 +43,6 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
             }
             opportunityIds = thisJob;
             chainedRemainder = remainder;
-            // Apex tests can't chain queueables - tests assert on chainedRemainder instead
-            if (!Test.isRunningTest()) {
-                System.enqueueJob(new AsanaTaskQueueable(remainder, taskMode));
-            }
         }
 
         List<Opportunity> opps = [
@@ -83,6 +79,13 @@ public without sharing class AsanaTaskQueueable implements Queueable, Database.A
         if (!toUpdateInSF.isEmpty()) {
             // Use database.update with allOrNone=false to avoid one failure killing the batch
             Database.update(toUpdateInSF, false);
+        }
+
+        // Chain only after all callouts: enqueueJob counts as uncommitted work, so
+        // any callout made after it fails with "You have uncommitted work pending".
+        // Apex tests can't chain queueables - tests assert on chainedRemainder instead
+        if (!remainder.isEmpty() && !Test.isRunningTest()) {
+            System.enqueueJob(new AsanaTaskQueueable(remainder, taskMode));
         }
     }
 }
